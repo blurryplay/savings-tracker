@@ -5,6 +5,8 @@ import './App.css';
 
 import Dashboard from './components/Dashboard';
 import SavingsPlansList from './components/SavingsPlansList';
+import ContributionHistory from './components/ContributionHistory';
+import Charts from './components/Charts';
 import CreatePlanModal from './components/CreatePlanModal';
 import ContributeModal from './components/ContributeModal';
 import WithdrawModal from './components/WithdrawModal';
@@ -179,13 +181,25 @@ function App() {
               active={activeTab === 'dashboard'} 
               onClick={() => setActiveTab('dashboard')}
             >
-              Dashboard
+              📊 Dashboard
             </Nav.Link>
             <Nav.Link 
               active={activeTab === 'plans'} 
               onClick={() => setActiveTab('plans')}
             >
-              My Plans
+              🎯 My Plans
+            </Nav.Link>
+            <Nav.Link 
+              active={activeTab === 'analytics'} 
+              onClick={() => setActiveTab('analytics')}
+            >
+              📈 Analytics
+            </Nav.Link>
+            <Nav.Link 
+              active={activeTab === 'history'} 
+              onClick={() => setActiveTab('history')}
+            >
+              📋 History
             </Nav.Link>
           </Nav>
         </Container>
@@ -235,6 +249,22 @@ function App() {
                 onWithdraw={openWithdrawModal}
                 onDelete={handleDeletePlan}
               />
+            )}
+
+            {activeTab === 'analytics' && (
+              <div>
+                <div className="d-flex justify-content-between align-items-center mb-4">
+                  <div>
+                    <h2 className="mb-1">📈 Analytics & Insights</h2>
+                    <p className="text-muted mb-0">Detailed analysis of your savings journey</p>
+                  </div>
+                </div>
+                <Charts chartData={dashboardData?.charts} />
+              </div>
+            )}
+
+            {activeTab === 'history' && (
+              <ContributionHistory plans={plans} />
             )}
           </Col>
         </Row>

@@ -228,12 +228,15 @@ app.post('/api/plans/:id/withdraw', async (req, res) => {
   }
 });
 
-// GET /api/dashboard - Dashboard summary
 app.get('/api/dashboard', async (req, res) => {
   try {
     const plans = await prisma.savingsPlan.findMany({
       include: {
-        contributions: true
+        contributions: {
+          orderBy: {
+            createdAt: 'desc'
+          }
+        }
       }
     });
 
@@ -253,18 +256,302 @@ app.get('/api/dashboard', async (req, res) => {
         ) / plans.length)
       : 0;
 
+    // Generate chart data
+    const chartData = await generateChartData(plans);
+
     res.json({
       totalPlans: plans.length,
       totalSavings,
       totalTargets,
       totalContributions,
-      averageProgress
+      averageProgress,
+      charts: chartData  // This was missing!
     });
   } catch (error) {
     console.error('Error fetching dashboard data:', error);
     res.status(500).json({ error: 'Failed to fetch dashboard data' });
   }
 });
+
+// GET /api/contributions - Get all contributions with plan details
+app.get('/api/contributions', async (req, res) => {
+  try {
+    const { limit = 50, offset = 0, planId } = req.query;
+    
+    const where = planId ? { planId } : {};
+    
+    const contributions = await prisma.contribution.findMany({
+      where,
+      include: {
+        plan: {
+          select: {
+            goalName: true,
+            id: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      take: parseInt(limit),
+      skip: parseInt(offset)
+    });
+
+    const total = await prisma.contribution.count({ where });
+
+    res.json({
+      contributions,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        hasMore: (parseInt(offset) + parseInt(limit)) < total
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching contributions:', error);
+    res.status(500).json({ error: 'Failed to fetch contributions' });
+  }
+});
+
+// Helper function to generate chart data
+async function generateChartData(plans) {
+  try {
+    // 1. Monthly contributions trend (line chart)
+    const monthlyTrend = await getMonthlyContributionTrend();
+    
+    // 2. Plans progress distribution (donut chart)
+    const progressDistribution = getProgressDistribution(plans);
+    
+    // 3. Top performing plans (bar chart)
+    const topPlans = getTopPerformingPlans(plans);
+    
+    // 4. Contribution vs Withdrawal comparison (bar chart)
+    const contributionComparison = await getContributionComparison();
+    
+    // 5. Savings by category (pie chart)
+    const savingsByCategory = getSavingsByCategory(plans);
+
+    return {
+      monthlyTrend,
+      progressDistribution,
+      topPlans,
+      contributionComparison,
+      savingsByCategory
+    };
+  } catch (error) {
+    console.error('Error generating chart data:', error);
+    return {};
+  }
+}
+
+async function getMonthlyContributionTrend() {
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+  const contributions = await prisma.contribution.findMany({
+    where: {
+      createdAt: {
+        gte: sixMonthsAgo
+      }
+    },
+    orderBy: {
+      createdAt: 'asc'
+    }
+  });
+
+  const monthlyData = {};
+  contributions.forEach(contribution => {
+    const monthKey = contribution.createdAt.toISOString().substring(0, 7); // YYYY-MM
+    if (!monthlyData[monthKey]) {
+      monthlyData[monthKey] = { contributions: 0, withdrawals: 0 };
+    }
+    
+    if (contribution.amount > 0) {
+      monthlyData[monthKey].contributions += contribution.amount;
+    } else {
+      monthlyData[monthKey].withdrawals += Math.abs(contribution.amount);
+    }
+  });
+
+  const labels = Object.keys(monthlyData).sort();
+  const contributionAmounts = labels.map(month => monthlyData[month]?.contributions || 0);
+  const withdrawalAmounts = labels.map(month => monthlyData[month]?.withdrawals || 0);
+
+  return {
+    labels: labels.map(month => {
+      const [year, monthNum] = month.split('-');
+      return new Date(year, monthNum - 1).toLocaleDateString('en-KE', { month: 'short', year: 'numeric' });
+    }),
+    datasets: [
+      {
+        label: 'Contributions',
+        data: contributionAmounts,
+        borderColor: '#28a745',
+        backgroundColor: 'rgba(40, 167, 69, 0.1)',
+        tension: 0.4
+      },
+      {
+        label: 'Withdrawals',
+        data: withdrawalAmounts,
+        borderColor: '#dc3545',
+        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+        tension: 0.4
+      }
+    ]
+  };
+}
+
+function getProgressDistribution(plans) {
+  const distribution = {
+    completed: 0,
+    almostThere: 0, // 75-99%
+    onTrack: 0,     // 50-74%
+    started: 0,     // 1-49%
+    notStarted: 0   // 0%
+  };
+
+  plans.forEach(plan => {
+    const progress = (plan.currentBalance / plan.targetAmount) * 100;
+    if (progress >= 100) distribution.completed++;
+    else if (progress >= 75) distribution.almostThere++;
+    else if (progress >= 50) distribution.onTrack++;
+    else if (progress > 0) distribution.started++;
+    else distribution.notStarted++;
+  });
+
+  return {
+    labels: ['Completed', 'Almost There (75-99%)', 'On Track (50-74%)', 'Getting Started (1-49%)', 'Not Started'],
+    datasets: [{
+      data: [
+        distribution.completed,
+        distribution.almostThere,
+        distribution.onTrack,
+        distribution.started,
+        distribution.notStarted
+      ],
+      backgroundColor: [
+        '#28a745', // Green - Completed
+        '#17a2b8', // Info - Almost there
+        '#ffc107', // Warning - On track
+        '#fd7e14', // Orange - Started
+        '#6c757d'  // Gray - Not started
+      ],
+      borderWidth: 2,
+      borderColor: '#fff'
+    }]
+  };
+}
+
+function getTopPerformingPlans(plans) {
+  const sortedPlans = [...plans]
+    .sort((a, b) => {
+      const progressA = (a.currentBalance / a.targetAmount) * 100;
+      const progressB = (b.currentBalance / b.targetAmount) * 100;
+      return progressB - progressA;
+    })
+    .slice(0, 5);
+
+  return {
+    labels: sortedPlans.map(plan => plan.goalName.length > 15 ? plan.goalName.substring(0, 15) + '...' : plan.goalName),
+    datasets: [{
+      label: 'Progress %',
+      data: sortedPlans.map(plan => Math.round((plan.currentBalance / plan.targetAmount) * 100)),
+      backgroundColor: [
+        '#28a745',
+        '#17a2b8',
+        '#ffc107',
+        '#fd7e14',
+        '#6f42c1'
+      ],
+      borderRadius: 8
+    }]
+  };
+}
+
+async function getContributionComparison() {
+  const last30Days = new Date();
+  last30Days.setDate(last30Days.getDate() - 30);
+
+  const recentContributions = await prisma.contribution.findMany({
+    where: {
+      createdAt: {
+        gte: last30Days
+      }
+    }
+  });
+
+  let totalContributions = 0;
+  let totalWithdrawals = 0;
+  let contributionCount = 0;
+  let withdrawalCount = 0;
+
+  recentContributions.forEach(contribution => {
+    if (contribution.amount > 0) {
+      totalContributions += contribution.amount;
+      contributionCount++;
+    } else {
+      totalWithdrawals += Math.abs(contribution.amount);
+      withdrawalCount++;
+    }
+  });
+
+  return {
+    labels: ['Contributions (Last 30 Days)', 'Withdrawals (Last 30 Days)'],
+    datasets: [{
+      label: 'Amount (KSH)',
+      data: [totalContributions, totalWithdrawals],
+      backgroundColor: ['#28a745', '#dc3545'],
+      borderRadius: 8
+    }]
+  };
+}
+
+function getSavingsByCategory(plans) {
+  const categories = {};
+  
+  plans.forEach(plan => {
+    let category = 'Other';
+    const goalName = plan.goalName.toLowerCase();
+    
+    if (goalName.includes('school') || goalName.includes('fees') || goalName.includes('education')) {
+      category = 'Education';
+    } else if (goalName.includes('emergency')) {
+      category = 'Emergency Fund';
+    } else if (goalName.includes('uniform') || goalName.includes('clothes')) {
+      category = 'Clothing';
+    } else if (goalName.includes('transport') || goalName.includes('travel')) {
+      category = 'Transport';
+    } else if (goalName.includes('laptop') || goalName.includes('computer') || goalName.includes('phone')) {
+      category = 'Electronics';
+    } else if (goalName.includes('book') || goalName.includes('stationery')) {
+      category = 'Books & Supplies';
+    }
+    
+    if (!categories[category]) {
+      categories[category] = 0;
+    }
+    categories[category] += plan.currentBalance;
+  });
+
+  return {
+    labels: Object.keys(categories),
+    datasets: [{
+      data: Object.values(categories),
+      backgroundColor: [
+        '#007bff', // Blue
+        '#28a745', // Green
+        '#ffc107', // Yellow
+        '#dc3545', // Red
+        '#6f42c1', // Purple
+        '#fd7e14', // Orange
+        '#20c997'  // Teal
+      ],
+      borderWidth: 2,
+      borderColor: '#fff'
+    }]
+  };
+}
 
 // DELETE /api/plans/:id - Delete a savings plan
 app.delete('/api/plans/:id', async (req, res) => {
@@ -317,3 +604,324 @@ process.on('SIGINT', async () => {
   await prisma.$disconnect();
   process.exit(0);
 });
+
+// GET /api/contributions - Get all contributions with plan details
+app.get('/api/contributions', async (req, res) => {
+  try {
+    const { limit = 50, offset = 0, planId } = req.query;
+    
+    const where = planId ? { planId } : {};
+    
+    const contributions = await prisma.contribution.findMany({
+      where,
+      include: {
+        plan: {
+          select: {
+            goalName: true,
+            id: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      take: parseInt(limit),
+      skip: parseInt(offset)
+    });
+
+    const total = await prisma.contribution.count({ where });
+
+    res.json({
+      contributions,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        hasMore: (parseInt(offset) + parseInt(limit)) < total
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching contributions:', error);
+    res.status(500).json({ error: 'Failed to fetch contributions' });
+  }
+});
+
+// Helper function to generate chart data
+async function generateChartData(plans) {
+  try {
+    console.log('📊 Generating chart data for', plans.length, 'plans');
+    
+    // 1. Monthly contributions trend (line chart)
+    const monthlyTrend = await getMonthlyContributionTrend();
+    
+    // 2. Plans progress distribution (donut chart)
+    const progressDistribution = getProgressDistribution(plans);
+    
+    // 3. Top performing plans (bar chart)
+    const topPlans = getTopPerformingPlans(plans);
+    
+    // 4. Contribution vs Withdrawal comparison (bar chart)
+    const contributionComparison = await getContributionComparison();
+    
+    // 5. Savings by category (pie chart)
+    const savingsByCategory = getSavingsByCategory(plans);
+
+    console.log('✅ Chart data generated successfully');
+    
+    return {
+      monthlyTrend,
+      progressDistribution,
+      topPlans,
+      contributionComparison,
+      savingsByCategory
+    };
+  } catch (error) {
+    console.error('❌ Error generating chart data:', error);
+    // Return empty data structure instead of failing
+    return {
+      monthlyTrend: { labels: [], datasets: [] },
+      progressDistribution: { labels: [], datasets: [{ data: [] }] },
+      topPlans: { labels: [], datasets: [{ data: [] }] },
+      contributionComparison: { labels: [], datasets: [{ data: [] }] },
+      savingsByCategory: { labels: [], datasets: [{ data: [] }] }
+    };
+  }
+}
+
+async function getMonthlyContributionTrend() {
+  try {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const contributions = await prisma.contribution.findMany({
+      where: {
+        createdAt: {
+          gte: sixMonthsAgo
+        }
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+
+    console.log('📈 Found', contributions.length, 'contributions for monthly trend');
+
+    const monthlyData = {};
+    contributions.forEach(contribution => {
+      const monthKey = contribution.createdAt.toISOString().substring(0, 7); // YYYY-MM
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = { contributions: 0, withdrawals: 0 };
+      }
+      
+      if (contribution.amount > 0) {
+        monthlyData[monthKey].contributions += contribution.amount;
+      } else {
+        monthlyData[monthKey].withdrawals += Math.abs(contribution.amount);
+      }
+    });
+
+    const labels = Object.keys(monthlyData).sort();
+    const contributionAmounts = labels.map(month => monthlyData[month]?.contributions || 0);
+    const withdrawalAmounts = labels.map(month => monthlyData[month]?.withdrawals || 0);
+
+    return {
+      labels: labels.map(month => {
+        if (!month) return '';
+        const [year, monthNum] = month.split('-');
+        const date = new Date(year, monthNum - 1);
+        return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      }),
+      datasets: [
+        {
+          label: 'Contributions',
+          data: contributionAmounts,
+          borderColor: '#28a745',
+          backgroundColor: 'rgba(40, 167, 69, 0.1)',
+          tension: 0.4,
+          fill: false
+        },
+        {
+          label: 'Withdrawals',
+          data: withdrawalAmounts,
+          borderColor: '#dc3545',
+          backgroundColor: 'rgba(220, 53, 69, 0.1)',
+          tension: 0.4,
+          fill: false
+        }
+      ]
+    };
+  } catch (error) {
+    console.error('Error generating monthly trend:', error);
+    return { labels: [], datasets: [] };
+  }
+}
+
+function getProgressDistribution(plans) {
+  try {
+    const distribution = {
+      completed: 0,
+      almostThere: 0, // 75-99%
+      onTrack: 0,     // 50-74%
+      started: 0,     // 1-49%
+      notStarted: 0   // 0%
+    };
+
+    plans.forEach(plan => {
+      const progress = plan.targetAmount > 0 ? (plan.currentBalance / plan.targetAmount) * 100 : 0;
+      if (progress >= 100) distribution.completed++;
+      else if (progress >= 75) distribution.almostThere++;
+      else if (progress >= 50) distribution.onTrack++;
+      else if (progress > 0) distribution.started++;
+      else distribution.notStarted++;
+    });
+
+    return {
+      labels: ['Completed', 'Almost There (75-99%)', 'On Track (50-74%)', 'Getting Started (1-49%)', 'Not Started'],
+      datasets: [{
+        data: [
+          distribution.completed,
+          distribution.almostThere,
+          distribution.onTrack,
+          distribution.started,
+          distribution.notStarted
+        ],
+        backgroundColor: [
+          '#28a745', // Green - Completed
+          '#17a2b8', // Info - Almost there
+          '#ffc107', // Warning - On track
+          '#fd7e14', // Orange - Started
+          '#6c757d'  // Gray - Not started
+        ],
+        borderWidth: 2,
+        borderColor: '#fff'
+      }]
+    };
+  } catch (error) {
+    console.error('Error generating progress distribution:', error);
+    return { labels: [], datasets: [{ data: [] }] };
+  }
+}
+
+function getTopPerformingPlans(plans) {
+  try {
+    const sortedPlans = [...plans]
+      .filter(plan => plan.targetAmount > 0) // Only plans with targets
+      .sort((a, b) => {
+        const progressA = (a.currentBalance / a.targetAmount) * 100;
+        const progressB = (b.currentBalance / b.targetAmount) * 100;
+        return progressB - progressA;
+      })
+      .slice(0, 5);
+
+    return {
+      labels: sortedPlans.map(plan => 
+        plan.goalName.length > 15 ? plan.goalName.substring(0, 15) + '...' : plan.goalName
+      ),
+      datasets: [{
+        label: 'Progress %',
+        data: sortedPlans.map(plan => Math.round((plan.currentBalance / plan.targetAmount) * 100)),
+        backgroundColor: [
+          '#28a745',
+          '#17a2b8',
+          '#ffc107',
+          '#fd7e14',
+          '#6f42c1'
+        ],
+        borderRadius: 8
+      }]
+    };
+  } catch (error) {
+    console.error('Error generating top plans:', error);
+    return { labels: [], datasets: [{ data: [] }] };
+  }
+}
+
+async function getContributionComparison() {
+  try {
+    const last30Days = new Date();
+    last30Days.setDate(last30Days.getDate() - 30);
+
+    const recentContributions = await prisma.contribution.findMany({
+      where: {
+        createdAt: {
+          gte: last30Days
+        }
+      }
+    });
+
+    let totalContributions = 0;
+    let totalWithdrawals = 0;
+
+    recentContributions.forEach(contribution => {
+      if (contribution.amount > 0) {
+        totalContributions += contribution.amount;
+      } else {
+        totalWithdrawals += Math.abs(contribution.amount);
+      }
+    });
+
+    return {
+      labels: ['Contributions (Last 30 Days)', 'Withdrawals (Last 30 Days)'],
+      datasets: [{
+        label: 'Amount (KSH)',
+        data: [totalContributions, totalWithdrawals],
+        backgroundColor: ['#28a745', '#dc3545'],
+        borderRadius: 8
+      }]
+    };
+  } catch (error) {
+    console.error('Error generating contribution comparison:', error);
+    return { labels: [], datasets: [{ data: [] }] };
+  }
+}
+
+function getSavingsByCategory(plans) {
+  try {
+    const categories = {};
+    
+    plans.forEach(plan => {
+      let category = 'Other';
+      const goalName = plan.goalName.toLowerCase();
+      
+      if (goalName.includes('school') || goalName.includes('fees') || goalName.includes('education')) {
+        category = 'Education';
+      } else if (goalName.includes('emergency')) {
+        category = 'Emergency Fund';
+      } else if (goalName.includes('uniform') || goalName.includes('clothes')) {
+        category = 'Clothing';
+      } else if (goalName.includes('transport') || goalName.includes('travel')) {
+        category = 'Transport';
+      } else if (goalName.includes('laptop') || goalName.includes('computer') || goalName.includes('phone')) {
+        category = 'Electronics';
+      } else if (goalName.includes('book') || goalName.includes('stationery')) {
+        category = 'Books & Supplies';
+      }
+      
+      if (!categories[category]) {
+        categories[category] = 0;
+      }
+      categories[category] += plan.currentBalance;
+    });
+
+    return {
+      labels: Object.keys(categories),
+      datasets: [{
+        data: Object.values(categories),
+        backgroundColor: [
+          '#007bff', // Blue
+          '#28a745', // Green
+          '#ffc107', // Yellow
+          '#dc3545', // Red
+          '#6f42c1', // Purple
+          '#fd7e14', // Orange
+          '#20c997'  // Teal
+        ],
+        borderWidth: 2,
+        borderColor: '#fff'
+      }]
+    };
+  } catch (error) {
+    console.error('Error generating savings by category:', error);
+    return { labels: [], datasets: [{ data: [] }] };
+  }
+}

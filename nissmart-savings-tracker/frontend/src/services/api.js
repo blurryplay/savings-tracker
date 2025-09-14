@@ -91,6 +91,25 @@ export const savingsAPI = {
     } catch (error) {
       throw new Error(error.response?.data?.error || 'Failed to fetch dashboard data');
     }
+  },
+
+  // Get contributions history
+  getContributions: async (params = {}) => {
+    try {
+      const queryParams = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          queryParams.append(key, value);
+        }
+      });
+      
+      const queryString = queryParams.toString();
+      const url = queryString ? `/contributions?${queryString}` : '/contributions';
+      const response = await api.get(url);
+      return response.data;
+    } catch (error) {
+      throw new Error(error.response?.data?.error || 'Failed to fetch contributions');
+    }
   }
 };
 
