@@ -1,0 +1,201 @@
+/* Global Styles */
+.App {
+  min-height: 100vh;
+  background-color: #f8f9fa;
+}
+
+/* Custom Progress Bar Sizes */
+.progress-lg {
+  height: 12px;
+  border-radius: 8px;
+}
+
+.progress-sm {
+  height: 6px;
+  border-radius: 4px;
+}
+
+/* Card Hover Effects */
+.plan-card {
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.plan-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
+}
+
+/* Custom Card Styles */
+.card {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.card-header {
+  border-radius: 12px 12px 0 0 !important;
+}
+
+/* Button Styles */
+.btn {
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+/* Badge Styles */
+.badge {
+  font-size: 0.75em;
+  padding: 0.375em 0.75em;
+  border-radius: 6px;
+}
+
+/* Modal Styles */
+.modal-content {
+  border-radius: 16px;
+  border: none;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+.modal-header {
+  border-radius: 16px 16px 0 0;
+  padding: 1.5rem;
+}
+
+.modal-footer {
+  border-radius: 0 0 16px 16px;
+  padding: 1.5rem;
+}
+
+/* Form Styles */
+.form-control {
+  border-radius: 8px;
+  border: 2px solid #e9ecef;
+  transition: all 0.2s ease;
+}
+
+.form-control:focus {
+  border-color: #0d6efd;
+  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.15);
+}
+
+/* Alert Styles */
+.alert {
+  border-radius: 12px;
+  border: none;
+}
+
+/* Navbar Styles */
+.navbar-brand {
+  font-size: 1.5rem;
+}
+
+/* Progress Bar Animation */
+.progress-bar {
+  transition: width 0.6s ease;
+}
+
+/* Loading Spinner */
+.spinner-border-lg {
+  width: 3rem;
+  height: 3rem;
+}
+
+/* Custom Colors for Kenyan Theme */
+:root {
+  --ksh-green: #006633;
+  --ksh-red: #cc0000;
+  --ksh-black: #000000;
+}
+
+.text-ksh-green {
+  color: var(--ksh-green) !important;
+}
+
+.text-ksh-red {
+  color: var(--ksh-red) !important;
+}
+
+.bg-ksh-green {
+  background-color: var(--ksh-green) !important;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+  .plan-card:hover {
+    transform: none;
+  }
+  
+  .modal-dialog {
+    margin: 1rem;
+  }
+  
+  .display-1 {
+    font-size: 3rem;
+  }
+  
+  .display-6 {
+    font-size: 2rem;
+  }
+}
+
+/* Animation for Success States */
+@keyframes celebration {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+.celebration {
+  animation: celebration 0.6s ease-in-out;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Utility Classes */
+.min-vh-100 {
+  min-height: 100vh;
+}
+
+.shadow-custom {
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+.border-dashed {
+  border-style: dashed !important;
+}
+
+/* Print Styles */
+@media print {
+  .btn,
+  .modal,
+  .navbar,
+  footer {
+    display: none !important;
+  }
+  
+  .card {
+    break-inside: avoid;
+  }
+}
